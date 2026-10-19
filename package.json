@@ -3,6 +3,9 @@
 	"version": "0.1.0",
 	"description": "OpenAI Codex, Anthropic and Claude SDK OAuth subscription quota lookup for Senpi. Adds a local /quota command that reuses Senpi-managed OAuth credentials.",
 	"type": "module",
+	"exports": {
+		".": "./src/lookup.ts"
+	},
 	"license": "MIT",
 	"author": "\uBCF5\uB35D <bokdong9417@gmail.com>",
 	"homepage": "https://github.com/bok-dong/pi-quota",
