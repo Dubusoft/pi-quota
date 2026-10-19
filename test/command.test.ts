@@ -6,8 +6,10 @@ import type {
 } from "@code-yeongyu/senpi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuotaModelRegistry } from "../src/auth.ts";
+import { whiteText } from "../src/format.ts";
 import type { HttpResponseLike } from "../src/http.ts";
 import registerQuotaExtension from "../src/index.ts";
+import { lookupQuota } from "../src/lookup.ts";
 
 const SECRET_TOKEN = "sk-command-canary-should-never-reach-the-ui-7b21";
 const STATUS_KEY = "pi-quota";
@@ -387,6 +389,20 @@ describe("quota extension registration", () => {
 });
 
 describe("quota command happy path", () => {
+	it("renders the same lookup output in the extension without adding ANSI to the library", async () => {
+		// Given the same authenticated providers and quota responses.
+		stubSuccessFetch();
+		const registry = bothProvidersRegistry();
+		const fake = fakeContext({ registry });
+		// When the standalone library and extension each read those quotas.
+		const lookup = await lookupQuota(registry, new AbortController().signal);
+		await quotaCommand(loadExtension()).handler("", fake.ctx);
+		// Then the extension adds only its existing white foreground styling.
+		expect(firstNotify(fake).message).toBe(whiteText(lookup.text));
+		expect(lookup.text).not.toContain("\u001b");
+		expect(lookup.results.map((result) => result.kind)).toEqual(["success", "success"]);
+	});
+
 	it("renders both providers in exactly one info notification", async () => {
 		const host = loadExtension();
 		const { urls } = stubSuccessFetch();

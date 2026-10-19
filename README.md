@@ -121,6 +121,20 @@ Senpi를 실행하고 대화형 모드에서 다음 명령을 입력합니다.
 
 ## 인증
 
+### 라이브러리
+
+확장 밖에서도 같은 조회와 ANSI 없는 결과를 사용할 수 있습니다. 인증 저장소는
+호스트 SDK가 만든 레지스트리를 전달합니다. 파일을 직접 읽거나 쓰지 않습니다.
+
+```typescript
+import { lookupQuota } from "pi-quota";
+
+const { results, text } = await lookupQuota(registry, AbortSignal.timeout(20_000));
+```
+
+`results`는 계정별 `ProviderResult[]`, `text`는 `/quota` 알림과 같은 형식의
+일반 텍스트입니다. 확장은 이 텍스트에 기존 흰색 표시만 적용합니다.
+
 `/quota`는 별도의 로그인 절차나 토큰 설정을 요구하지 않습니다. Senpi에 이미
 로그인되어 있는 OpenAI Codex·Anthropic·Claude SDK OAuth 계정의 자격 증명을 그대로
 읽어 사용합니다.
