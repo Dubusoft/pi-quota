@@ -47,8 +47,8 @@ function displayNameForProvider(result: ProviderUnavailable | ProviderFailure): 
 }
 
 /**
- * Renders the remaining time at one granularity: whole days from 24h up,
- * half-hours below 24h, whole minutes below 1h. Every step rounds down so the
+ * Renders the remaining time at one granularity: whole days plus whole hours
+ * (days alone when no hour remains) from 24h up, half-hours below 24h, whole minutes below 1h. Every step rounds down so the
  * displayed time never overstates what is left.
  */
 function formatResetTime(resetAt: Date, now: Date): string {
@@ -59,7 +59,10 @@ function formatResetTime(resetAt: Date, now: Date): string {
 	if (totalMinutes < 60) return `${totalMinutes}m`;
 
 	const days = Math.floor(totalMinutes / (24 * 60));
-	if (days > 0) return `${days}d`;
+	if (days > 0) {
+		const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+		return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+	}
 
 	const halfHours = Math.floor(totalMinutes / 30) / 2;
 	return `${halfHours}h`;

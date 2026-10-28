@@ -47,13 +47,13 @@ describe("formatQuotaResults", () => {
 				"   [OpenAI]",
 				"     Five-hour              2h",
 				"     █████████████████████░░░░ 82%",
-				"     Weekly                 2d",
+				"     Weekly              2d 2h",
 				"     ███████████████░░░░░░░░░░ 61%",
 				"",
 				"   [Anthropic]",
 				"     Five-hour              1h",
 				"     ███████████████████░░░░░░ 74%",
-				"     Weekly                 2d",
+				"     Weekly              2d 5h",
 				"     ████████████░░░░░░░░░░░░░ 48%",
 			].join("\n"),
 		);
@@ -88,9 +88,23 @@ describe("formatQuotaResults", () => {
 		expect(formatQuotaResults([halfHour], now)).toContain("22.5h");
 	});
 
-	it("uses whole days for reset times of 24 hours or more", () => {
-		expect(formatQuotaResults([openAiSuccess], now)).toContain("2d");
-		expect(formatQuotaResults([openAiSuccess], now)).not.toContain("2d ");
+	it("uses whole days plus whole hours for reset times of 24 hours or more", () => {
+		const almostTwoDays = {
+			...openAiSuccess,
+			windows: [{ label: "Weekly", remainingPercent: 50, resetAt: new Date(2026, 7, 10, 6, 45) }],
+		} as const satisfies ProviderResult;
+
+		expect(formatQuotaResults([openAiSuccess], now)).toContain("2d 2h");
+		expect(formatQuotaResults([almostTwoDays], now)).toContain("1d 23h");
+	});
+
+	it("drops the hours when a whole number of days remains", () => {
+		const twoDays = {
+			...openAiSuccess,
+			windows: [{ label: "Weekly", remainingPercent: 50, resetAt: new Date(2026, 7, 10, 7, 45) }],
+		} as const satisfies ProviderResult;
+
+		expect(formatQuotaResults([twoDays], now)).toContain("     Weekly                 2d\n");
 	});
 
 	it("uses whole minutes for reset times under one hour", () => {
@@ -127,7 +141,7 @@ describe("formatQuotaResults", () => {
 				"   [OpenAI]",
 				"     Five-hour              2h",
 				"     █████████████████████░░░░ 82%",
-				"     Weekly                 2d",
+				"     Weekly              2d 2h",
 				"     ███████████████░░░░░░░░░░ 61%",
 				"",
 				"   [Anthropic]: no quota data in the response",
@@ -153,7 +167,7 @@ describe("formatQuotaResults", () => {
 				"   [OpenAI]",
 				"     Five-hour              2h",
 				"     █████████████████████░░░░ 82%",
-				"     Weekly                 2d",
+				"     Weekly              2d 2h",
 				"     ███████████████░░░░░░░░░░ 61%",
 			].join("\n"),
 		);
@@ -180,7 +194,7 @@ describe("formatQuotaResults", () => {
 		expect(formatQuotaResults([labelled], now)).toBe(
 			[
 				"   [OpenAI: work]",
-				"     Weekly                 2d",
+				"     Weekly              2d 2h",
 				"     ███████████████░░░░░░░░░░ 61%",
 			].join("\n"),
 		);
@@ -231,7 +245,7 @@ describe("formatQuotaResults", () => {
 				"   [Anthropic]",
 				"     Five-hour              1h",
 				"     ███████████████████░░░░░░ 74%",
-				"     Weekly                 2d",
+				"     Weekly              2d 5h",
 				"     ████████████░░░░░░░░░░░░░ 48%",
 				"",
 				"   [Claude SDK]",
