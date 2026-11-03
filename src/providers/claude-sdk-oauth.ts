@@ -1,4 +1,9 @@
-import type { EnvReader, QuotaModelRegistry, TokenRefresher } from "../auth.ts";
+import type {
+	CredentialFileReader,
+	EnvReader,
+	QuotaModelRegistry,
+	TokenRefresher,
+} from "../auth.ts";
 import { resolveClaudeSdkOauthCredentials } from "../auth.ts";
 import type { FetchLike } from "../http.ts";
 import type { ProviderResult, QuotaAccount } from "../types.ts";
@@ -18,6 +23,8 @@ export interface ClaudeSdkOauthQuotaOptions {
 	readonly env?: EnvReader;
 	/** Redeems an expired account's refresh token; defaults to the host's OAuth flow. */
 	readonly refresher?: TokenRefresher;
+	/** Reads a Claude Code managed account's credential file; defaults to the file system. */
+	readonly readFile?: CredentialFileReader;
 }
 
 /**
@@ -38,6 +45,7 @@ export async function fetchClaudeSdkOauthQuota(
 		{
 			...(options.signal ? { signal: options.signal } : {}),
 			...(options.refresher ? { refresher: options.refresher } : {}),
+			...(options.readFile ? { readFile: options.readFile } : {}),
 		},
 	);
 	// Resolving may have awaited a refresh, during which the caller can cancel.

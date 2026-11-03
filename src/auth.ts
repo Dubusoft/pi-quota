@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { ProviderId, QuotaAccount, UnavailableReason } from "./types.ts";
 
 export interface QuotaAuthModel {
@@ -61,6 +63,18 @@ export function hostProviderIds(providerId: ProviderId): readonly string[] {
  * the marker itself can never authenticate a request.
  */
 const CLAUDE_SDK_OAUTH_SENTINEL = "claude-sdk-oauth-managed";
+
+/**
+ * Store kind of an account whose OAuth material Claude Code keeps in its own
+ * config directory. The host lists such an account without any token: the
+ * token lives in `<agent dir>/anthropic-subscription-claude/<dirId>/.credentials.json`,
+ * and Claude Code alone refreshes and rewrites it.
+ */
+const CLAUDE_CLI_STORE = "claude-cli";
+const CLAUDE_CLI_ACCOUNTS_DIR = "anthropic-subscription-claude";
+const CLAUDE_CLI_CREDENTIALS_FILE = ".credentials.json";
+/** The account directory ids the host itself accepts. */
+const CLAUDE_CLI_DIR_ID = /^[0-9a-f]{32}$/;
 
 /**
  * Read-only Claude Code tokens the host accepts from the environment, under the
@@ -151,7 +165,8 @@ function storedSlots(registry: QuotaModelRegistry, providerId: ProviderId): read
 }
 
 /** One Claude SDK OAuth account together with the token stored for it. */
-interface ClaudeSdkOauthSlot {
+interface ClaudeSdkOauthTokenSlot {
+	readonly kind: "token";
 	readonly account: QuotaAccount;
 	readonly accessToken: string;
 	/** Epoch milliseconds, absent when the account's source reports no expiry. */
@@ -160,9 +175,28 @@ interface ClaudeSdkOauthSlot {
 	readonly hostId?: string;
 }
 
+/** One Claude SDK OAuth account whose token Claude Code keeps on disk. */
+interface ClaudeCliSlot {
+	readonly kind: "claude-cli";
+	readonly account: QuotaAccount;
+	/** The account's config directory id; absent when the host stored an invalid one. */
+	readonly dirId?: string;
+}
+
+type ClaudeSdkOauthSlot = ClaudeSdkOauthTokenSlot | ClaudeCliSlot;
+
 function toClaudeSdkOauthSlot(slot: unknown): ClaudeSdkOauthSlot | undefined {
 	const account = toAccount(slot);
 	if (!account) return undefined;
+
+	// Listed even when its token file cannot be read, so a configured account
+	// reports why it is unavailable instead of dropping out of the output.
+	if (readProperty(slot, "store") === CLAUDE_CLI_STORE) {
+		const dirId = readProperty(slot, "dirId");
+		return typeof dirId === "string" && CLAUDE_CLI_DIR_ID.test(dirId)
+			? { kind: "claude-cli", account, dirId }
+			: { kind: "claude-cli", account };
+	}
 
 	const access = readProperty(slot, "access");
 	if (typeof access !== "string" || access.length === 0 || access === CLAUDE_SDK_OAUTH_SENTINEL) {
@@ -171,8 +205,8 @@ function toClaudeSdkOauthSlot(slot: unknown): ClaudeSdkOauthSlot | undefined {
 
 	const expires = readProperty(slot, "expires");
 	return typeof expires === "number" && Number.isFinite(expires) && expires > 0
-		? { account, accessToken: access, expiresAt: expires }
-		: { account, accessToken: access };
+		? { kind: "token", account, accessToken: access, expiresAt: expires }
+		: { kind: "token", account, accessToken: access };
 }
 
 /**
@@ -190,7 +224,7 @@ function claudeSdkOauthSlots(
 	for (const raw of stored?.slots ?? []) {
 		const slot = toClaudeSdkOauthSlot(raw);
 		if (slot && !slots.some((existing) => existing.account.name === slot.account.name)) {
-			slots.push(stored ? { ...slot, hostId: stored.hostId } : slot);
+			slots.push(stored && slot.kind === "token" ? { ...slot, hostId: stored.hostId } : slot);
 		}
 	}
 
@@ -203,15 +237,15 @@ function claudeSdkOauthSlots(
 		}
 		if (typeof token !== "string" || token.length === 0) continue;
 		if (slots.some((existing) => existing.account.name === name)) continue;
-		slots.push({ account: { name, label: name }, accessToken: token });
+		slots.push({ kind: "token", account: { name, label: name }, accessToken: token });
 	}
 
 	return slots;
 }
 
 /**
- * Lists every Claude SDK OAuth account that holds a readable token, including
- * the only one when the lane has just one. An empty list means the lane is not
+ * Lists every configured Claude SDK OAuth account, including the only one when
+ * the lane has just one, whether or not its token can be read right now. An empty list means the lane is not
  * configured at all, which is what keeps this opt-in provider out of the
  * output of a session that never signed into it.
  */
@@ -236,11 +270,19 @@ export type TokenRefresher = (
 	signal?: AbortSignal,
 ) => Promise<RefreshedTokens>;
 
+/** Reads one Claude Code credential file as text. */
+export type CredentialFileReader = (path: string, signal?: AbortSignal) => Promise<string>;
+
 export interface ClaudeSdkOauthRefreshOptions {
 	readonly signal?: AbortSignal;
 	/** Redeems a refresh token; defaults to the host's Anthropic OAuth flow. */
 	readonly refresher?: TokenRefresher;
+	/** Reads a Claude Code credential file; defaults to the local file system. */
+	readonly readFile?: CredentialFileReader;
 }
+
+const readCredentialFile: CredentialFileReader = (path, signal) =>
+	readFile(path, signal ? { encoding: "utf8", signal } : { encoding: "utf8" });
 
 function nonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -369,6 +411,65 @@ async function refreshExpiredAccount(
 	return usableStoredToken(latest, accountName);
 }
 
+/** The agent directory the host keeps its auth store in, when it says so. */
+function hostAgentDir(registry: QuotaModelRegistry): string | undefined {
+	const getStoragePath = hostCall(registry.authStorage, "getStoragePath");
+	if (!getStoragePath) return undefined;
+	try {
+		const storagePath = nonEmptyString(getStoragePath());
+		return storagePath === undefined ? undefined : dirname(storagePath);
+	} catch {
+		return undefined;
+	}
+}
+
+async function readClaudeCliToken(
+	read: CredentialFileReader,
+	path: string,
+	signal: AbortSignal | undefined,
+): Promise<AuthResolution> {
+	let text: string;
+	try {
+		text = await read(path, signal);
+	} catch (error) {
+		if (isAbortError(error) || signal?.aborted) throw error;
+		return NOT_CONFIGURED;
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		return NOT_CONFIGURED;
+	}
+	const oauth = readProperty(parsed, "claudeAiOauth");
+	const access = nonEmptyString(readProperty(oauth, "accessToken"));
+	if (access === undefined || access === CLAUDE_SDK_OAUTH_SENTINEL) return NOT_CONFIGURED;
+	if (isExpired(positiveNumber(readProperty(oauth, "expiresAt")))) return TOKEN_EXPIRED;
+	return { ok: true, credentials: { accessToken: access } };
+}
+
+/**
+ * Reads a Claude Code managed account's token from its own config directory,
+ * fresh on every lookup so a rotation Claude Code wrote is picked up. Claude
+ * Code owns that token's refresh and its lock, so an expired token is re-read
+ * once to adopt a rotation that just landed and otherwise reported as expired;
+ * it is never refreshed here.
+ */
+async function resolveClaudeCliAccount(
+	registry: QuotaModelRegistry,
+	slot: ClaudeCliSlot,
+	options: ClaudeSdkOauthRefreshOptions,
+): Promise<AuthResolution> {
+	if (slot.dirId === undefined) return NOT_CONFIGURED;
+	const agentDir = hostAgentDir(registry);
+	if (agentDir === undefined) return NOT_CONFIGURED;
+	const path = join(agentDir, CLAUDE_CLI_ACCOUNTS_DIR, slot.dirId, CLAUDE_CLI_CREDENTIALS_FILE);
+	const read = options.readFile ?? readCredentialFile;
+	const first = await readClaudeCliToken(read, path, options.signal);
+	if (first.ok || first.reason !== "token-expired") return first;
+	return readClaudeCliToken(read, path, options.signal);
+}
+
 /**
  * Reads one Claude SDK OAuth account's access token, or the only account's when
  * no name is given. The host resolves this provider's auth to a managed marker
@@ -391,6 +492,7 @@ export async function resolveClaudeSdkOauthCredentials(
 			? slots[0]
 			: slots.find((candidate) => candidate.account.name === accountName);
 	if (!slot) return NOT_CONFIGURED;
+	if (slot.kind === "claude-cli") return resolveClaudeCliAccount(registry, slot, refresh);
 	if (!isExpired(slot.expiresAt)) {
 		return { ok: true, credentials: { accessToken: slot.accessToken } };
 	}
