@@ -501,6 +501,139 @@ describe("resolveClaudeSdkOauthCredentials", async () => {
 	});
 });
 
+describe("Claude Code managed accounts", () => {
+	const AGENT_DIR = "/agents/isolated";
+	const DIR_A = "a".repeat(32);
+	const DIR_B = "b".repeat(32);
+
+	function cliSlot(name: string, dirId: unknown): unknown {
+		return {
+			name,
+			source: "login",
+			store: "claude-cli",
+			dirId,
+			profile: { subscriptionType: "max" },
+		};
+	}
+
+	function credentialPath(dirId: string): string {
+		return `${AGENT_DIR}/anthropic-subscription-claude/${dirId}/.credentials.json`;
+	}
+
+	function credentialFile(accessToken: unknown, expiresAt: unknown): string {
+		return JSON.stringify({ claudeAiOauth: { accessToken, refreshToken: "r", expiresAt } });
+	}
+
+	function cliRegistry(slots: unknown, storagePath: unknown = `${AGENT_DIR}/auth.json`) {
+		const refreshed: string[] = [];
+		const registry = fakeRegistry({
+			authStorage: {
+				listSlots: (provider: string) => (provider === "anthropic-subscription" ? slots : []),
+				getStoragePath: () => storagePath,
+				modify: async () => {
+					refreshed.push("modify");
+					throw new Error("must not touch the host store");
+				},
+			},
+		});
+		return { registry, refreshed };
+	}
+
+	function fileReader(files: Record<string, string | (() => string)>, reads: string[] = []) {
+		return async (path: string): Promise<string> => {
+			reads.push(path);
+			const file = files[path];
+			if (file === undefined) throw new Error(`ENOENT ${path}`);
+			return typeof file === "function" ? file() : file;
+		};
+	}
+
+	const refusingRefresher: TokenRefresher = async () => {
+		throw new Error("must not refresh a Claude Code managed account");
+	};
+
+	it("lists a metadata-only account that carries no token", () => {
+		const { registry } = cliRegistry([cliSlot("default", DIR_A), cliSlot("broken", "../x")]);
+
+		expect(listClaudeSdkOauthAccounts(registry, noEnv)).toEqual([
+			{ name: "default", label: "default" },
+			{ name: "broken", label: "broken" },
+		]);
+	});
+
+	it("reads the token from the account's own directory under the host's agent dir", async () => {
+		const reads: string[] = [];
+		const { registry } = cliRegistry([cliSlot("default", DIR_A)]);
+		const readFile = fileReader(
+			{ [credentialPath(DIR_A)]: credentialFile(CLAUDE_TOKEN, Date.now() + HOUR_MS) },
+			reads,
+		);
+
+		expect(
+			await resolveClaudeSdkOauthCredentials(registry, undefined, noEnv, { readFile }),
+		).toEqual({ ok: true, credentials: { accessToken: CLAUDE_TOKEN } });
+		expect(reads).toEqual([credentialPath(DIR_A)]);
+	});
+
+	it("keeps each account on its own file and one failure off its sibling", async () => {
+		const { registry } = cliRegistry([cliSlot("default", DIR_A), cliSlot("login-2", DIR_B)]);
+		const readFile = fileReader({
+			[credentialPath(DIR_B)]: credentialFile(`${CLAUDE_TOKEN}-2`, Date.now() + HOUR_MS),
+		});
+
+		expect(
+			await resolveClaudeSdkOauthCredentials(registry, "default", noEnv, { readFile }),
+		).toEqual({ ok: false, reason: "oauth-not-configured" });
+		expect(
+			await resolveClaudeSdkOauthCredentials(registry, "login-2", noEnv, { readFile }),
+		).toEqual({ ok: true, credentials: { accessToken: `${CLAUDE_TOKEN}-2` } });
+	});
+
+	it("rejects malformed files, the managed marker, invalid ids and a host without a store path", async () => {
+		const readFile = fileReader({
+			[credentialPath(DIR_A)]: "{not json",
+			[credentialPath(DIR_B)]: credentialFile(CLAUDE_SENTINEL, Date.now() + HOUR_MS),
+		});
+		const unconfigured = { ok: false, reason: "oauth-not-configured" };
+		const resolve = (slots: unknown, storagePath?: unknown) =>
+			resolveClaudeSdkOauthCredentials(cliRegistry(slots, storagePath).registry, undefined, noEnv, {
+				readFile,
+			});
+
+		expect(await resolve([cliSlot("default", DIR_A)])).toEqual(unconfigured);
+		expect(await resolve([cliSlot("default", DIR_B)])).toEqual(unconfigured);
+		expect(await resolve([cliSlot("default", "../../etc")])).toEqual(unconfigured);
+		expect(await resolve([cliSlot("default", DIR_A)], 42)).toEqual(unconfigured);
+	});
+
+	it("adopts a rotation Claude Code just wrote and otherwise reports expiry without refreshing", async () => {
+		const { registry, refreshed } = cliRegistry([cliSlot("default", DIR_A)]);
+		const versions = [
+			credentialFile(`${CLAUDE_TOKEN}-old`, Date.now() - 1000),
+			credentialFile(`${CLAUDE_TOKEN}-new`, Date.now() + HOUR_MS),
+		];
+		const rotating = fileReader({ [credentialPath(DIR_A)]: () => versions.shift() ?? "" });
+		const stale = fileReader({
+			[credentialPath(DIR_A)]: credentialFile(CLAUDE_TOKEN, Date.now() - 1000),
+		});
+		const options = { refresher: refusingRefresher };
+
+		expect(
+			await resolveClaudeSdkOauthCredentials(registry, undefined, noEnv, {
+				...options,
+				readFile: rotating,
+			}),
+		).toEqual({ ok: true, credentials: { accessToken: `${CLAUDE_TOKEN}-new` } });
+		expect(
+			await resolveClaudeSdkOauthCredentials(registry, undefined, noEnv, {
+				...options,
+				readFile: stale,
+			}),
+		).toEqual({ ok: false, reason: "token-expired" });
+		expect(refreshed).toEqual([]);
+	});
+});
+
 describe("resolveClaudeSdkOauthCredentials refreshing an expired stored token", () => {
 	const HOST_ID = "anthropic-subscription";
 	const ROTATED: RefreshedTokens = {
