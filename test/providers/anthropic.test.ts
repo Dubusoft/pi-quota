@@ -147,19 +147,25 @@ describe("fetchAnthropicQuota", () => {
 		});
 	});
 
-	it("reports no-quota-windows when only the five hour window is present", async () => {
+	it("returns the weekly window alone for a plan without a five hour limit", async () => {
 		const { fetch } = recordingFetch(() =>
-			jsonResponse({ five_hour: { utilization: 26, resets_at: "2026-08-06T12:00:00Z" } }),
+			jsonResponse({
+				five_hour: null,
+				seven_day: { utilization: 52.4, resets_at: "2026-08-10T12:00:00Z" },
+			}),
 		);
 		const result = await fetchAnthropicQuota(oauthRegistry(), { fetch });
 		expect(result).toEqual({
-			kind: "unavailable",
+			kind: "success",
 			provider: "anthropic",
-			reason: "no-quota-windows",
+			displayName: "Anthropic",
+			windows: [
+				{ label: "Weekly", remainingPercent: 48, resetAt: new Date("2026-08-10T12:00:00Z") },
+			],
 		});
 	});
 
-	it("reports no-quota-windows when the seven day utilization is not numeric", async () => {
+	it("returns the five hour window alone when the seven day utilization is not numeric", async () => {
 		const { fetch } = recordingFetch(() =>
 			jsonResponse({
 				five_hour: { utilization: 26 },
@@ -168,16 +174,15 @@ describe("fetchAnthropicQuota", () => {
 		);
 		const result = await fetchAnthropicQuota(oauthRegistry(), { fetch });
 		expect(result).toEqual({
-			kind: "unavailable",
+			kind: "success",
 			provider: "anthropic",
-			reason: "no-quota-windows",
+			displayName: "Anthropic",
+			windows: [{ label: "Five-hour", remainingPercent: 74 }],
 		});
 	});
 
-	it("reports no-quota-windows when a window is not an object", async () => {
-		const { fetch } = recordingFetch(() =>
-			jsonResponse({ five_hour: 26, seven_day: { utilization: 52 } }),
-		);
+	it("reports no-quota-windows when no window is usable", async () => {
+		const { fetch } = recordingFetch(() => jsonResponse({ five_hour: 26, seven_day: null }));
 		const result = await fetchAnthropicQuota(oauthRegistry(), { fetch });
 		expect(result).toEqual({
 			kind: "unavailable",
@@ -330,7 +335,7 @@ describe("fetchAnthropicQuota", () => {
 					throw new SyntaxError(`bad json for token ${SECRET_TOKEN}`);
 				},
 			}),
-			() => jsonResponse({ five_hour: { utilization: 5 } }),
+			() => jsonResponse({ five_hour: null, seven_day: null }),
 		];
 		for (const respond of responses) {
 			const { fetch } = recordingFetch(respond);

@@ -74,9 +74,13 @@ function parseUsage(payload: unknown, lane: Lane): ProviderResult {
 			...lane.account,
 		};
 	}
-	const fiveHour = parseWindow("Five-hour", root.five_hour ?? root.fiveHour);
-	const sevenDay = parseWindow("Weekly", root.seven_day ?? root.sevenDay);
-	if (!fiveHour || !sevenDay) {
+	// A plan without a five-hour limit (Claude Max Ultra) answers `five_hour: null`
+	// beside its weekly window, so each window is reported when it is present.
+	const windows = [
+		parseWindow("Five-hour", root.five_hour ?? root.fiveHour),
+		parseWindow("Weekly", root.seven_day ?? root.sevenDay),
+	].filter((window) => window !== undefined);
+	if (windows.length === 0) {
 		return {
 			kind: "unavailable",
 			provider: lane.provider,
@@ -88,7 +92,7 @@ function parseUsage(payload: unknown, lane: Lane): ProviderResult {
 		kind: "success",
 		provider: lane.provider,
 		displayName: lane.displayName,
-		windows: [fiveHour, sevenDay],
+		windows,
 		...lane.account,
 	};
 }

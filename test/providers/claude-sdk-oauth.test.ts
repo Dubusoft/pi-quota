@@ -287,7 +287,7 @@ describe("fetchClaudeSdkOauthQuota", () => {
 		const responses: ReadonlyArray<() => HttpResponseLike> = [
 			() => errorResponse(401),
 			() => errorResponse(429, "30"),
-			() => jsonResponse({ five_hour: { utilization: 5 } }),
+			() => jsonResponse({ five_hour: null, seven_day: null }),
 			() => ({
 				ok: true,
 				status: 200,
