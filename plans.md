@@ -7,7 +7,7 @@
 `/quota`를 실행할 수 있어야 한다.
 
 ```bash
-senpi install git:github.com/bok-dong/pi-quota
+senpi install git:github.com/Dubusoft/pi-quota
 ```
 
 ```text
@@ -194,7 +194,7 @@ Anthropic
 
 - 의존성 설치 성공
 - 빈 확장 진입점 typecheck 성공
-- `senpi install git:github.com/bok-dong/pi-quota`가 패키지 메타데이터를
+- `senpi install git:github.com/Dubusoft/pi-quota`가 패키지 메타데이터를
   인식할 구조 완성
 
 ### 단계 2 — 공통 타입, 인증, HTTP

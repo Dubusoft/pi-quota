@@ -42,7 +42,7 @@ OpenAI Codex·Anthropic·Claude SDK OAuth 사용량 조회에 집중합니다.
 ## 설치
 
 ```bash
-senpi install git:github.com/bok-dong/pi-quota
+senpi install git:github.com/Dubusoft/pi-quota
 ```
 
 설치 후 Senpi를 다시 시작하거나 대화형 세션에서 `/reload`를 실행하면 `/quota`
@@ -51,13 +51,13 @@ senpi install git:github.com/bok-dong/pi-quota
 ### 업데이트
 
 ```bash
-senpi update git:github.com/bok-dong/pi-quota
+senpi update git:github.com/Dubusoft/pi-quota
 ```
 
 ### 제거
 
 ```bash
-senpi remove git:github.com/bok-dong/pi-quota
+senpi remove git:github.com/Dubusoft/pi-quota
 ```
 
 (`senpi uninstall`은 `remove`의 별칭이며 동일하게 동작합니다.)
