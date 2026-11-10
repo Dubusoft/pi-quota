@@ -8,13 +8,13 @@
 	},
 	"license": "MIT",
 	"author": "\uBCF5\uB35D <bokdong9417@gmail.com>",
-	"homepage": "https://github.com/bok-dong/pi-quota",
+	"homepage": "https://github.com/Dubusoft/pi-quota",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/bok-dong/pi-quota.git"
+		"url": "git+https://github.com/Dubusoft/pi-quota.git"
 	},
 	"bugs": {
-		"url": "https://github.com/bok-dong/pi-quota/issues"
+		"url": "https://github.com/Dubusoft/pi-quota/issues"
 	},
 	"keywords": [
 		"pi",
