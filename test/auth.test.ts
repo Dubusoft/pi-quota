@@ -7,6 +7,7 @@ import type {
 	TokenRefresher,
 } from "../src/auth.ts";
 import {
+	claudeCodeCredentialReader,
 	listClaudeSdkOauthAccounts,
 	listQuotaAccounts,
 	resolveClaudeSdkOauthCredentials,
@@ -631,6 +632,37 @@ describe("Claude Code managed accounts", () => {
 			}),
 		).toEqual({ ok: false, reason: "token-expired" });
 		expect(refreshed).toEqual([]);
+	});
+
+	it("reads the account's Keychain entry on macOS, falling back to its file, and only the file elsewhere", async () => {
+		const { registry } = cliRegistry([cliSlot("default", DIR_A)]);
+		const valid = credentialFile(CLAUDE_TOKEN, Date.now() + HOUR_MS);
+		const services: string[] = [];
+		const keychain = (entries: Record<string, string>) => async (service: string) => {
+			services.push(service);
+			const entry = entries[service];
+			if (entry === undefined) throw new Error("item not found");
+			return entry;
+		};
+		const resolveWith = (readFile: (path: string) => Promise<string>) =>
+			resolveClaudeSdkOauthCredentials(registry, undefined, noEnv, { readFile });
+		const found = { ok: true, credentials: { accessToken: CLAUDE_TOKEN } };
+
+		const inKeychain = keychain({ "Claude Code-credentials-b4594494": valid });
+		expect(
+			await resolveWith(claudeCodeCredentialReader("darwin", inKeychain, fileReader({}))),
+		).toEqual(found);
+		expect(services).toEqual(["Claude Code-credentials-b4594494"]);
+
+		const onDisk = fileReader({ [credentialPath(DIR_A)]: valid });
+		expect(await resolveWith(claudeCodeCredentialReader("darwin", keychain({}), onDisk))).toEqual(
+			found,
+		);
+		services.length = 0;
+		expect(await resolveWith(claudeCodeCredentialReader("linux", inKeychain, onDisk))).toEqual(
+			found,
+		);
+		expect(services).toEqual([]);
 	});
 });
 

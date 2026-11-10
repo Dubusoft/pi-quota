@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ProviderId, QuotaAccount, UnavailableReason } from "./types.ts";
@@ -277,12 +279,65 @@ export interface ClaudeSdkOauthRefreshOptions {
 	readonly signal?: AbortSignal;
 	/** Redeems a refresh token; defaults to the host's Anthropic OAuth flow. */
 	readonly refresher?: TokenRefresher;
-	/** Reads a Claude Code credential file; defaults to the local file system. */
+	/**
+	 * Reads a Claude Code credential file; defaults to the macOS Keychain entry
+	 * of the file's directory on macOS and to the local file system otherwise.
+	 */
 	readonly readFile?: CredentialFileReader;
 }
 
 const readCredentialFile: CredentialFileReader = (path, signal) =>
 	readFile(path, signal ? { encoding: "utf8", signal } : { encoding: "utf8" });
+
+/** Reads one macOS Keychain generic password by its service name. */
+export type KeychainReader = (service: string, signal?: AbortSignal) => Promise<string>;
+
+const readMacKeychain: KeychainReader = (service, signal) =>
+	new Promise((resolve, reject) => {
+		execFile(
+			"security",
+			["find-generic-password", "-s", service, "-w"],
+			signal ? { encoding: "utf8", signal } : { encoding: "utf8" },
+			(error, stdout) => (error ? reject(error) : resolve(stdout)),
+		);
+	});
+
+/**
+ * The Keychain service Claude Code on macOS stores one config directory's
+ * credentials under instead of writing `.credentials.json` there: the first
+ * eight hex digits of the directory path's SHA-256 name the entry.
+ */
+export function claudeCodeKeychainService(configDir: string): string {
+	const digest = createHash("sha256").update(configDir).digest("hex");
+	return `Claude Code-credentials-${digest.slice(0, 8)}`;
+}
+
+/**
+ * Reads a Claude Code credential file where Claude Code keeps it on this
+ * platform: the Keychain entry of the file's directory on macOS, falling back
+ * to the file itself, and the file alone everywhere else.
+ */
+export function claudeCodeCredentialReader(
+	platform: NodeJS.Platform,
+	readKeychain: KeychainReader,
+	readFromFile: CredentialFileReader,
+): CredentialFileReader {
+	if (platform !== "darwin") return readFromFile;
+	return async (path, signal) => {
+		try {
+			return await readKeychain(claudeCodeKeychainService(dirname(path)), signal);
+		} catch (error) {
+			if (isAbortError(error) || signal?.aborted) throw error;
+			return readFromFile(path, signal);
+		}
+	};
+}
+
+const readClaudeCodeCredentials = claudeCodeCredentialReader(
+	process.platform,
+	readMacKeychain,
+	readCredentialFile,
+);
 
 function nonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -464,7 +519,7 @@ async function resolveClaudeCliAccount(
 	const agentDir = hostAgentDir(registry);
 	if (agentDir === undefined) return NOT_CONFIGURED;
 	const path = join(agentDir, CLAUDE_CLI_ACCOUNTS_DIR, slot.dirId, CLAUDE_CLI_CREDENTIALS_FILE);
-	const read = options.readFile ?? readCredentialFile;
+	const read = options.readFile ?? readClaudeCodeCredentials;
 	const first = await readClaudeCliToken(read, path, options.signal);
 	if (first.ok || first.reason !== "token-expired") return first;
 	return readClaudeCliToken(read, path, options.signal);
