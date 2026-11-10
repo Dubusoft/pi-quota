@@ -23,7 +23,7 @@ export interface ClaudeSdkOauthQuotaOptions {
 	readonly env?: EnvReader;
 	/** Redeems an expired account's refresh token; defaults to the host's OAuth flow. */
 	readonly refresher?: TokenRefresher;
-	/** Reads a Claude Code managed account's credential file; defaults to the file system. */
+	/** Reads a Claude Code managed account's credentials; defaults to the Keychain on macOS, else the file. */
 	readonly readFile?: CredentialFileReader;
 }
 
