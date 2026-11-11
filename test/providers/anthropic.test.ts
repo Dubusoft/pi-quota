@@ -165,7 +165,7 @@ describe("fetchAnthropicQuota", () => {
 		});
 	});
 
-	it("adds a model-scoped weekly limit under its model name", async () => {
+	it("leaves model-scoped weekly limits out of the reported windows", async () => {
 		const { fetch } = recordingFetch(() =>
 			jsonResponse({
 				five_hour: null,
@@ -191,11 +191,6 @@ describe("fetchAnthropicQuota", () => {
 			displayName: "Anthropic",
 			windows: [
 				{ label: "Weekly", remainingPercent: 60, resetAt: new Date("2026-08-10T12:00:00Z") },
-				{
-					label: "Weekly Fable",
-					remainingPercent: 93,
-					resetAt: new Date("2026-08-10T12:00:00Z"),
-				},
 			],
 		});
 	});
