@@ -165,6 +165,41 @@ describe("fetchAnthropicQuota", () => {
 		});
 	});
 
+	it("adds a model-scoped weekly limit under its model name", async () => {
+		const { fetch } = recordingFetch(() =>
+			jsonResponse({
+				five_hour: null,
+				seven_day: { utilization: 40, resets_at: "2026-08-10T12:00:00Z" },
+				limits: [
+					{ kind: "weekly_all", percent: 40, resets_at: "2026-08-10T12:00:00Z", scope: null },
+					{
+						kind: "weekly_scoped",
+						percent: 7,
+						resets_at: "2026-08-10T12:00:00Z",
+						scope: { model: { id: null, display_name: "Fable" }, surface: null },
+					},
+					{ kind: "weekly_scoped", percent: 9, scope: { model: { display_name: null } } },
+					{ kind: "weekly_scoped", percent: "9", scope: { model: { display_name: "Other" } } },
+					"not-a-limit",
+				],
+			}),
+		);
+		const result = await fetchAnthropicQuota(oauthRegistry(), { fetch });
+		expect(result).toEqual({
+			kind: "success",
+			provider: "anthropic",
+			displayName: "Anthropic",
+			windows: [
+				{ label: "Weekly", remainingPercent: 60, resetAt: new Date("2026-08-10T12:00:00Z") },
+				{
+					label: "Weekly Fable",
+					remainingPercent: 93,
+					resetAt: new Date("2026-08-10T12:00:00Z"),
+				},
+			],
+		});
+	});
+
 	it("returns the five hour window alone when the seven day utilization is not numeric", async () => {
 		const { fetch } = recordingFetch(() =>
 			jsonResponse({

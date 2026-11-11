@@ -38,6 +38,23 @@ interface RawUsage {
 	readonly fiveHour?: unknown;
 	readonly seven_day?: unknown;
 	readonly sevenDay?: unknown;
+	readonly limits?: unknown;
+}
+
+/** One entry of the `limits` list, which also carries model-scoped weekly limits. */
+interface RawLimit {
+	readonly kind?: unknown;
+	readonly percent?: unknown;
+	readonly resets_at?: unknown;
+	readonly scope?: unknown;
+}
+
+interface RawScope {
+	readonly model?: unknown;
+}
+
+interface RawModel {
+	readonly display_name?: unknown;
 }
 
 function asRecord<T extends object>(value: unknown): T | undefined {
@@ -64,6 +81,27 @@ function parseWindow(label: string, value: unknown): QuotaWindow | undefined {
 	return resetAt ? { label, remainingPercent, resetAt } : { label, remainingPercent };
 }
 
+/**
+ * A weekly limit scoped to one model (Fable, for instance) is answered only as
+ * a `limits` entry of kind `weekly_scoped`, beside the plan-wide weekly window.
+ * Each one is reported under its model's name.
+ */
+function parseScopedWeeklyWindows(value: unknown): QuotaWindow[] {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((entry): QuotaWindow[] => {
+		const limit = asRecord<RawLimit>(entry);
+		if (limit?.kind !== "weekly_scoped") return [];
+		const model = asRecord<RawModel>(asRecord<RawScope>(limit.scope)?.model);
+		const name = model?.display_name;
+		if (typeof name !== "string" || name.trim() === "") return [];
+		const window = parseWindow(`Weekly ${name.trim()}`, {
+			utilization: limit.percent,
+			resets_at: limit.resets_at,
+		});
+		return window ? [window] : [];
+	});
+}
+
 function parseUsage(payload: unknown, lane: Lane): ProviderResult {
 	const root = asRecord<RawUsage>(payload);
 	if (!root) {
@@ -79,7 +117,9 @@ function parseUsage(payload: unknown, lane: Lane): ProviderResult {
 	const windows = [
 		parseWindow("Five-hour", root.five_hour ?? root.fiveHour),
 		parseWindow("Weekly", root.seven_day ?? root.sevenDay),
-	].filter((window) => window !== undefined);
+	]
+		.filter((window) => window !== undefined)
+		.concat(parseScopedWeeklyWindows(root.limits));
 	if (windows.length === 0) {
 		return {
 			kind: "unavailable",
